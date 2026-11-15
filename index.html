@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="theme-color" content="#c2a460"/><title>Shadows & Sweethearts · Label Maker</title></head>
 <body><div id="app">
-<header><p class="hint" style="font-weight:700;color:#7d2128">LABEL FONT FIX v3 — select 16 or 42 to test</p><div class="eyebrow">SHADOWS & SWEETHEARTS · BOOKSTORE</div><h1>Product label maker</h1><p>DYMO LabelWriter 550 · genuine roll 30336 · 1 × 2⅛ in</p></header>
+<header><p class="hint" style="font-weight:700;color:#7d2128">LABEL FONT FIX v4 — project build verified</p><div class="eyebrow">SHADOWS & SWEETHEARTS · BOOKSTORE</div><h1>Product label maker</h1><p>DYMO LabelWriter 550 · genuine roll 30336 · 1 × 2⅛ in</p></header>
 <main><section class="panel"><h2>Import Square inventory (CSV)</h2>
 <p class="hint">Export your Item Library as CSV from Square, then select it here. The file is read locally in Chrome: no Square password, API token, or inventory updates.</p>
 <label for="squareFile">Square Item Library CSV</label><input id="squareFile" type="file" accept=".csv,text/csv"/>
@@ -34,4 +34,4 @@
 <p class="hint">A single batch is limited to 500 labels. If printing stops, verify the printed labels before retrying to avoid duplicates. Your CSV stays in this tab.</p>
 </section><section class="panel"><h2>Label preview</h2><p class="hint">Actual print layout: 54 × 25 mm at 300 dpi (638 × 295 dots). Preview may appear larger on-screen.</p><div class="label-wrap"><canvas id="labelCanvas" width="638" height="295" aria-label="Current label preview"></canvas></div><button id="png" type="button" class="outline">Save PNG preview</button><p class="hint">Use genuine DYMO 30336 labels. The printer's NFC roll identification can override software settings; if the loaded roll differs, printing is blocked when the driver reports the mismatch.</p></section></main>
 <footer>Unofficial in-house label tool · Uses thermal-label open-source WebUSB driver · Not affiliated with DYMO.</footer>
-</div><script type="module" src="/src/main.js"></script></body></html>
+</div><script type="module" src="./src/main.js"></script></body></html>
