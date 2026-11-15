@@ -244,7 +244,7 @@ els.connect.addEventListener('click',connect);
 els.print.addEventListener('click',print);
 for(const k of ['name','price','sku','brand'])els[k].addEventListener('input',()=>{render();if(valid&&!printer)setStatus('Preview ready. Click Connect DYMO 550 to enable printing.');});
 els.png.addEventListener('click',()=>{if(!render())return;const link=document.createElement('a');link.download='shadows-sweethearts-30336-label.png';link.href=els.labelCanvas.toDataURL('image/png');link.click();});
-render();setStatus('Font control v3 loaded. Preview ready. Connect DYMO 550 to print.');
+render();setStatus('Font control v4 loaded. Preview ready. Connect DYMO 550 to print.');
 if(!navigator.usb){setStatus('Chrome WebUSB is unavailable. Open the hosted HTTPS site in Chrome on the Chromebook.');els.connect.disabled=true;}
 
 
