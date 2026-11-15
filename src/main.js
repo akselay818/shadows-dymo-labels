@@ -36,6 +36,9 @@ function parseSquareCsv(text){
  const heads=rows[headIndex].map(clean);
  const col=(...names)=>heads.findIndex(h=>names.includes(h));
  const itemCol=col('item name'), skuCol=col('sku'), variationCol=col('variation name');
+ const categoryCol=col('category','categories','reporting category');
+ // Square exports may contain separate per-location current quantity columns.
+ const stockCols=heads.map((h,i)=>({h,i})).filter(x=>/^(current quantity|current stock|quantity on hand)(\s|$)/.test(x.h)).map(x=>x.i);
  const priceCol=heads.findIndex(h=>h==='price');
  const otherPriceCols=heads.map((h,i)=>({h,i})).filter(x=>/^price\s*[([]/.test(x.h)).map(x=>x.i);
  const priceCols=[priceCol,...otherPriceCols].filter(i=>i>=0);
@@ -48,7 +51,10 @@ function parseSquareCsv(text){
   let amount=priceText.replace(/[$,]/g,'').trim();
   // Square can mark prices as variable; these are not safe to auto-fill.
   const usable=amount!==''&&/^\d+(?:\.\d{1,2})?$/.test(amount)&&Number.isFinite(Number(amount));
-  result.push({name,sku,variation,price:usable?Number(amount).toFixed(2):'',rawPrice:priceText});
+  const quantities=stockCols.map(i=>String(r[i]??'').replace(/,/g,'').trim());
+  const knownQuantities=quantities.filter(v=>/^-?\d+(?:\.\d+)?$/.test(v));
+  const stock=stockCols.length&&knownQuantities.length===stockCols.length?knownQuantities.reduce((n,v)=>n+Number(v),0):null;
+  result.push({name,sku,variation,price:usable?Number(amount).toFixed(2):'',rawPrice:priceText,category:categoryCol>=0?(r[categoryCol]||'').trim()||'Uncategorized':'Uncategorized',stock});
  }
  return result;
 }
@@ -72,8 +78,9 @@ sq.squareFile.addEventListener('change',async()=>{
   squareRows=parseSquareCsv(await f.text());
   if(!squareRows.length)throw new Error('No inventory items found in the CSV.');
   sq.squareSearch.value='';sq.squareSearch.disabled=false;sq.squareItem.disabled=false;drawSquareResults();
+  initializeBatch();
   showSquareStatus(`${squareRows.length} Square product variations loaded from ${f.name}. Data stays in this browser tab.`);
- }catch(e){squareRows=[];sq.squareItem.replaceChildren();showSquareStatus('Import failed: '+e.message);}
+ }catch(e){squareRows=[];sq.squareItem.replaceChildren();initializeBatch();showSquareStatus('Import failed: '+e.message);}
 });
 sq.squareSearch.addEventListener('input',drawSquareResults);
 sq.squareItem.addEventListener('change',()=>{sq.useSquare.disabled=sq.squareItem.selectedIndex<0;});
@@ -146,9 +153,9 @@ async function connect(){
   if(status.detectedMedia && !sameMedia(status.detectedMedia))throw new Error('Loaded label size does not match 30336 (25 × 54 mm). Change the roll before printing.');
   els.connect.textContent='Reconnect DYMO';
   setStatus('Connected and ready. Confirm you loaded genuine DYMO 30336 labels, then print one test label.');
-  els.print.disabled=!valid;
+  els.print.disabled=!valid;updateBatchControls();
  }catch(e){setStatus('Connection problem: '+(e?.message||e));els.print.disabled=true;if(printer){try{await printer.close();}catch{}printer=null;}}
- finally{els.connect.disabled=false;}
+ finally{els.connect.disabled=false;updateBatchControls();}
 }
 async function print(){
  if(!printer||!render())return;
@@ -178,3 +185,97 @@ for(const k of ['name','price','sku','brand'])els[k].addEventListener('input',()
 els.png.addEventListener('click',()=>{if(!render())return;const link=document.createElement('a');link.download='shadows-sweethearts-30336-label.png';link.href=els.labelCanvas.toDataURL('image/png');link.click();});
 render();setStatus('Preview ready. Click Connect DYMO 550 to enable printing.');
 if(!navigator.usb){setStatus('Chrome WebUSB is unavailable. Open the hosted HTTPS site in Chrome on the Chromebook.');els.connect.disabled=true;}
+
+
+// Batch queue uses the same validated canvas renderer and the same printer.print path
+// as the already-working single-label printer. It makes no Square API calls.
+const b=Object.fromEntries(['batchCategory','batchSearch','stockOnly','batchStockHelp','batchSelect','batchClear','batchCopies','batchApplyCopies','batchRows','batchSummary','batchPrint','batchStop','batchStatus'].map(id=>[id,document.getElementById(id)]));
+const selections=new Map(); // index in imported Square CSV => copies
+let batchBusy=false, stopRequested=false;
+const batchStatus = text=>{b.batchStatus.textContent=text;};
+const printable = row=>!!row && !!row.sku && row.sku.length<=32 && /^[\x20-\x7e]+$/.test(row.sku) && row.price!=='' && Number.isFinite(Number(row.price)) && Number(row.price)>=0 && Number(row.price)<=999999;
+const labelName = row=>row.variation && row.variation.toLowerCase()!=='regular'?`${row.name} — ${row.variation}`:row.name;
+function filteredBatchIndices(){
+ const cat=b.batchCategory.value, q=b.batchSearch.value.trim().toLowerCase();
+ return squareRows.map((row,i)=>({row,i})).filter(({row})=>
+  (cat==='*'||row.category===cat) &&
+  (!b.stockOnly.checked || (row.stock!==null && row.stock>0)) &&
+  (row.name+' '+row.variation+' '+row.sku).toLowerCase().includes(q)).map(x=>x.i);
+}
+function initializeBatch(){
+ selections.clear();b.batchSearch.value='';b.stockOnly.checked=false;
+ const categories=[...new Set(squareRows.map(x=>x.category))].sort((a,c)=>a.localeCompare(c));
+ b.batchCategory.replaceChildren();
+ for(const [value,label] of [['*','All categories'],...categories.map(c=>[c,c])]){
+  const option=document.createElement('option');option.value=value;option.textContent=label;b.batchCategory.add(option);
+ }
+ const hasStock=squareRows.some(row=>row.stock!==null);
+ b.stockOnly.disabled=!hasStock;
+ b.batchStockHelp.textContent=hasStock?'Only in stock uses quantities from the imported CSV, not live Square availability. Products without a readable quantity are excluded.':'No recognized current-quantity columns were found in this CSV; in-stock filtering is unavailable.';
+ b.batchCategory.disabled=b.batchSearch.disabled=b.batchSelect.disabled=b.batchClear.disabled=b.batchApplyCopies.disabled=!squareRows.length;
+ renderBatchRows();
+}
+function updateBatchControls(){
+ const total=[...selections.values()].reduce((a,c)=>a+c,0);
+ b.batchSummary.textContent=`${selections.size} products selected · ${total} labels${total>500?' — over 500-label limit':''}`;
+ b.batchPrint.disabled=!printer||!selections.size||total>500||batchBusy;
+ b.batchStop.disabled=!batchBusy;
+ b.batchSelect.disabled=b.batchClear.disabled=b.batchApplyCopies.disabled=batchBusy||!squareRows.length;
+ b.batchCategory.disabled=b.batchSearch.disabled=batchBusy||!squareRows.length;
+ b.stockOnly.disabled=batchBusy||!squareRows.some(row=>row.stock!==null);
+ b.batchCopies.disabled=batchBusy;
+ b.batchRows.querySelectorAll('input').forEach(input=>input.disabled=batchBusy||input.dataset.invalid==='true');
+}
+function renderBatchRows(){
+ b.batchRows.replaceChildren();
+ const indices=filteredBatchIndices();
+ const visible=indices.slice(0,400);
+ if(!visible.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=4;td.textContent='No matching products.';tr.append(td);b.batchRows.append(tr);}
+ for(const i of visible){
+  const row=squareRows[i], ok=printable(row);
+  const tr=document.createElement('tr');if(!ok)tr.className='invalid';
+  const checktd=document.createElement('td'),check=document.createElement('input');check.type='checkbox';check.checked=selections.has(i);check.dataset.invalid=String(!ok);
+  check.setAttribute('aria-label','Select '+labelName(row));
+  check.addEventListener('change',()=>{if(check.checked)selections.set(i,Number(b.batchCopies.value)||1);else selections.delete(i);renderBatchRows();});checktd.append(check);
+  const nametd=document.createElement('td'),main=document.createElement('span'),sub=document.createElement('small');main.textContent=labelName(row);sub.textContent=(row.sku||'NO SKU')+' · '+row.category+(row.stock!==null?' · stock '+row.stock:'')+(!ok?' · missing/invalid SKU or price':'');nametd.append(main,sub);
+  const pricetd=document.createElement('td');pricetd.textContent=row.price?'$'+row.price:'—';
+  const copytd=document.createElement('td'),copies=document.createElement('input');copies.type='number';copies.min='1';copies.max='20';copies.value=selections.get(i)||Number(b.batchCopies.value)||1;copies.dataset.invalid=String(!ok);copies.setAttribute('aria-label','Copies for '+labelName(row));
+  copies.addEventListener('change',()=>{const value=Number(copies.value);if(!Number.isInteger(value)||value<1||value>20){copies.value=selections.get(i)||1;return;}if(selections.has(i))selections.set(i,value);updateBatchControls();});copytd.append(copies);
+  tr.append(checktd,nametd,pricetd,copytd);b.batchRows.append(tr);
+ }
+ if(indices.length>400){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=4;td.textContent=`Showing first 400 of ${indices.length} matching products. Narrow the search to view additional items. “Select all filtered” includes all matching valid items.`;tr.append(td);b.batchRows.append(tr);}
+ updateBatchControls();
+}
+b.batchCategory.addEventListener('change',renderBatchRows);b.batchSearch.addEventListener('input',renderBatchRows);b.stockOnly.addEventListener('change',renderBatchRows);
+b.batchSelect.addEventListener('click',()=>{const copies=Number(b.batchCopies.value);if(!Number.isInteger(copies)||copies<1||copies>20){batchStatus('Copies must be 1–20.');return;}for(const i of filteredBatchIndices())if(printable(squareRows[i]))selections.set(i,copies);renderBatchRows();});
+b.batchClear.addEventListener('click',()=>{selections.clear();renderBatchRows();});
+b.batchApplyCopies.addEventListener('click',()=>{const copies=Number(b.batchCopies.value);if(!Number.isInteger(copies)||copies<1||copies>20){batchStatus('Copies must be 1–20.');return;}for(const i of selections.keys())selections.set(i,copies);renderBatchRows();});
+b.batchStop.addEventListener('click',()=>{stopRequested=true;batchStatus('Stop requested; finishing the current label.');});
+b.batchPrint.addEventListener('click',async()=>{
+ if(!printer||batchBusy)return;
+ const queue=[...selections.entries()].map(([i,copies])=>({row:squareRows[i],copies}));
+ const total=queue.reduce((a,x)=>a+x.copies,0);
+ if(total<1||total>500){batchStatus('Choose 1–500 labels.');return;}
+ if(queue.some(x=>!printable(x.row)||!Number.isInteger(x.copies)||x.copies<1||x.copies>20)){batchStatus('Selection has invalid product data or copies.');return;}
+ if(!window.confirm(`Send ${total} labels for ${queue.length} products to your DYMO 550? Check the loaded 30336 roll first.`))return;
+ batchBusy=true;stopRequested=false;updateBatchControls();
+ const original={name:els.name.value,price:els.price.value,sku:els.sku.value};let completed=0;
+ try{
+  const st=await printer.getStatus();if(!st.ready||st.mediaLoaded===false)throw new Error('Printer is not ready or labels are absent.');
+  if(st.detectedMedia&&!sameMedia(st.detectedMedia))throw new Error('Loaded labels do not match 30336.');
+  const media=selectedMedia();if(!media)throw new Error('Driver has no 30336 media definition.');
+  outer: for(const item of queue){
+   els.name.value=labelName(item.row);els.price.value=item.row.price;els.sku.value=item.row.sku;
+   if(!render())throw new Error('Could not render '+labelName(item.row));
+   const img=ctx.getImageData(0,0,W,H);const image={width:W,height:H,data:new Uint8Array(img.data)};
+   for(let copy=0;copy<item.copies;copy++){
+    if(stopRequested)break outer;
+    batchStatus(`Sending label ${completed+1} of ${total}: ${labelName(item.row)} (${copy+1}/${item.copies})`);
+    await printer.print(image,media);completed++;
+   }
+  }
+  batchStatus(stopRequested?`Stopped after ${completed} of ${total} labels sent. Check physical output before restarting.`:`Finished sending ${completed} labels to the DYMO. Verify the labels and scan a barcode.`);
+ }catch(e){batchStatus(`Batch stopped after ${completed} of ${total} labels sent. ${e?.message||e} Check which labels printed before retrying.`);}
+ finally{els.name.value=original.name;els.price.value=original.price;els.sku.value=original.sku;render();batchBusy=false;updateBatchControls();}
+});
+initializeBatch();
