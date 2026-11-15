@@ -5,7 +5,7 @@ import { MEDIA } from '@thermal-label/labelwriter-core';
 
 // DYMO 30336: 54 mm across printer head, 25 mm feed direction, @ 300 dpi.
 const W = 638, H = 295;
-const els = Object.fromEntries(['name','price','qty','sku','brand','connect','print','status','png','labelCanvas'].map(id=>[id,document.getElementById(id)]));
+const els = Object.fromEntries(['name','price','qty','sku','brand','nameFontSize','nameFontValue','resetNameFont','connect','print','status','png','labelCanvas'].map(id=>[id,document.getElementById(id)]));
 const ctx = els.labelCanvas.getContext('2d',{willReadFrequently:true});
 // Square's CSV is loaded only into this browser tab. No Square credentials or write access.
 const sq = Object.fromEntries(['squareFile','squareStatus','squareSearch','squareItem','useSquare'].map(id=>[id,document.getElementById(id)]));
@@ -117,7 +117,7 @@ function render(){
   ctx.fillStyle='#111111';ctx.textAlign='left';ctx.textBaseline='middle';
   if(els.brand.checked){ctx.font='700 19px Arial';ctx.fillText('SHADOWS & SWEETHEARTS',25,29);ctx.fillRect(25,44,W-50,2);}
   const top=els.brand.checked?70:40;
-  const titleSize=fitText(name,34,W-50);
+  const titleSize=fitText(name,Number(els.nameFontSize.value),W-50);
   ctx.font=`700 ${titleSize}px Arial`;ctx.fillText(name,25,top,W-50);
   const priceSize=fitText(price,65,290);
   ctx.font=`800 ${priceSize}px Arial`;ctx.fillText(price,26,152);
@@ -179,6 +179,16 @@ async function print(){
  }catch(e){setStatus('Printing failed: '+(e?.message||e)+' — reconnect if needed, then retry one label.');}
  finally{els.print.disabled=!valid||!printer;}
 }
+// Applies to the preview, individual labels, and the shared batch renderer.
+els.nameFontSize.addEventListener('input',()=>{
+ els.nameFontValue.textContent=els.nameFontSize.value;
+ render();
+});
+els.resetNameFont.addEventListener('click',()=>{
+ els.nameFontSize.value='28';
+ els.nameFontValue.textContent='28';
+ render();
+});
 els.connect.addEventListener('click',connect);
 els.print.addEventListener('click',print);
 for(const k of ['name','price','sku','brand'])els[k].addEventListener('input',()=>{render();if(valid&&!printer)setStatus('Preview ready. Click Connect DYMO 550 to enable printing.');});
