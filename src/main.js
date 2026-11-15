@@ -5,7 +5,7 @@ import { MEDIA } from '@thermal-label/labelwriter-core';
 
 // DYMO 30336: 54 mm across printer head, 25 mm feed direction, @ 300 dpi.
 const W = 638, H = 295;
-const els = Object.fromEntries(['name','price','qty','sku','brand','nameFontSize','nameFontValue','nameFontActual','resetNameFont','connect','print','status','png','labelCanvas'].map(id=>[id,document.getElementById(id)]));
+const els = Object.fromEntries(['name','price','qty','sku','brand','nameFontSize','nameFontValue','nameFontActual','nameFontInput','increaseNameFont','decreaseNameFont','nameFontDemo','resetNameFont','connect','print','status','png','labelCanvas'].map(id=>[id,document.getElementById(id)]));
 const ctx = els.labelCanvas.getContext('2d',{willReadFrequently:true});
 // Square's CSV is loaded only into this browser tab. No Square credentials or write access.
 const sq = Object.fromEntries(['squareFile','squareStatus','squareSearch','squareItem','useSquare'].map(id=>[id,document.getElementById(id)]));
@@ -230,21 +230,33 @@ async function print(){
  }catch(e){setStatus('Printing failed: '+(e?.message||e)+' — reconnect if needed, then retry one label.');}
  finally{els.print.disabled=!valid||!printer;}
 }
-// Applies to the preview, individual labels, and the shared batch renderer.
-els.nameFontSize.addEventListener('input',()=>{
- els.nameFontValue.textContent=els.nameFontSize.value;
+// All size controls use one source of truth, and every change redraws the
+// same canvas that is sent to the DYMO printer (single and batch).
+function setNameFontSize(next) {
+ const parsed=Number(next);
+ if (!Number.isFinite(parsed)) return;
+ const size=Math.max(16,Math.min(42,Math.round(parsed)));
+ els.nameFontSize.value=String(size);
+ els.nameFontInput.value=String(size);
+ els.nameFontValue.textContent=String(size);
+ // This browser-native sample is intentionally independent of canvas so
+ // the user can tell immediately that the event handler is running.
+ els.nameFontDemo.style.fontSize=`${size}px`;
+ els.nameFontDemo.textContent=els.name.value.trim()||'Floral Kindle Case';
+ els.nameFontDemo.dataset.currentSize=String(size);
  render();
-});
-els.resetNameFont.addEventListener('click',()=>{
- els.nameFontSize.value='28';
- els.nameFontValue.textContent='28';
- render();
-});
-els.connect.addEventListener('click',connect);
+}
+els.nameFontSize.addEventListener('input',()=>setNameFontSize(els.nameFontSize.value));
+els.nameFontSize.addEventListener('change',()=>setNameFontSize(els.nameFontSize.value));
+els.nameFontInput.addEventListener('input',()=>{if(els.nameFontInput.value!=='')setNameFontSize(els.nameFontInput.value);});
+els.nameFontInput.addEventListener('change',()=>setNameFontSize(els.nameFontInput.value||28));
+els.increaseNameFont.addEventListener('click',()=>setNameFontSize(Number(els.nameFontSize.value)+1));
+els.decreaseNameFont.addEventListener('click',()=>setNameFontSize(Number(els.nameFontSize.value)-1));
+els.resetNameFont.addEventListener('click',()=>setNameFontSize(28));
 els.print.addEventListener('click',print);
-for(const k of ['name','price','sku','brand'])els[k].addEventListener('input',()=>{render();if(valid&&!printer)setStatus('Preview ready. Click Connect DYMO 550 to enable printing.');});
+for(const k of ['name','price','sku','brand'])els[k].addEventListener('input',()=>{if(k==='name'){els.nameFontDemo.textContent=els.name.value.trim()||'Floral Kindle Case';}render();if(valid&&!printer)setStatus('Preview ready. Click Connect DYMO 550 to enable printing.');});
 els.png.addEventListener('click',()=>{if(!render())return;const link=document.createElement('a');link.download='shadows-sweethearts-30336-label.png';link.href=els.labelCanvas.toDataURL('image/png');link.click();});
-render();setStatus('Font control v4 loaded. Preview ready. Connect DYMO 550 to print.');
+setNameFontSize(28);setStatus('Font controls v5 loaded. Preview ready. Connect DYMO 550 to print.');
 if(!navigator.usb){setStatus('Chrome WebUSB is unavailable. Open the hosted HTTPS site in Chrome on the Chromebook.');els.connect.disabled=true;}
 
 
