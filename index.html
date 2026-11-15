@@ -2,7 +2,15 @@
 <html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="theme-color" content="#c2a460"/><title>Shadows & Sweethearts · Label Maker</title></head>
 <body><div id="app">
 <header><div class="eyebrow">SHADOWS & SWEETHEARTS · BOOKSTORE</div><h1>Product label maker</h1><p>DYMO LabelWriter 550 · genuine roll 30336 · 1 × 2⅛ in</p></header>
-<main><section class="panel"><h2>Product details</h2><label for="name">Product name</label><input id="name" maxlength="100" value="Floral Kindle Case"/>
+<main><section class="panel"><h2>Import Square inventory (CSV)</h2>
+<p class="hint">Export your Item Library as CSV from Square, then select it here. The file is read locally in Chrome: no Square password, API token, or inventory updates.</p>
+<label for="squareFile">Square Item Library CSV</label><input id="squareFile" type="file" accept=".csv,text/csv"/>
+<p id="squareStatus" class="hint" role="status" aria-live="polite">No Square inventory loaded yet.</p>
+<label for="squareSearch">Find a product (name, variation, SKU)</label><input id="squareSearch" type="search" placeholder="Search your imported items…" disabled/>
+<label for="squareItem">Matching Square products</label><select id="squareItem" size="6" disabled aria-label="Matching Square products"><option>Import a CSV first</option></select>
+<button id="useSquare" type="button" class="outline" disabled>Use selected product on label</button>
+<p class="hint">Selecting an item fills in the name, price, and SKU. Nothing is sent back to Square. Variations remain separate; missing prices or SKUs must be filled in manually before printing.</p>
+</section><section class="panel"><h2>Product details</h2><label for="name">Product name</label><input id="name" maxlength="100" value="Floral Kindle Case"/>
 <div class="twocol"><div><label for="price">Price ($)</label><input id="price" type="number" min="0" step="0.01" value="25.00"/></div><div><label for="qty">Copies</label><input id="qty" type="number" min="1" max="20" step="1" value="1"/></div></div>
 <label for="sku">SKU / barcode value</label><input id="sku" maxlength="32" value="CASE-FLORAL-01"/><p class="hint">Prints a real Code 128 barcode that encodes your exact SKU. Use the SKU stored in Square for scanner lookup.</p>
 <label class="check"><input id="brand" type="checkbox" checked/> Show bookstore name</label>
