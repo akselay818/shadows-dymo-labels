@@ -7,6 +7,85 @@ import { MEDIA } from '@thermal-label/labelwriter-core';
 const W = 638, H = 295;
 const els = Object.fromEntries(['name','price','qty','sku','brand','connect','print','status','png','labelCanvas'].map(id=>[id,document.getElementById(id)]));
 const ctx = els.labelCanvas.getContext('2d',{willReadFrequently:true});
+// Square's CSV is loaded only into this browser tab. No Square credentials or write access.
+const sq = Object.fromEntries(['squareFile','squareStatus','squareSearch','squareItem','useSquare'].map(id=>[id,document.getElementById(id)]));
+let squareRows = [], visibleSquareRows = [];
+const showSquareStatus = message => {sq.squareStatus.textContent=message;};
+// RFC 4180-style CSV parser: handles quoted commas, escaped quotes and embedded newlines.
+function parseCsv(text){
+ const rows=[]; let fields=[], field='', quoted=false;
+ text=text.replace(/^\uFEFF/,'');
+ for(let i=0;i<text.length;i++){
+  const ch=text[i];
+  if(quoted){if(ch==='"'&&text[i+1]==='"'){field+='"';i++;}else if(ch==='"')quoted=false;else field+=ch;}
+  else if(ch==='"'&&field==='')quoted=true;
+  else if(ch===','){fields.push(field);field='';}
+  else if(ch==='\n'||ch==='\r'){if(ch==='\r'&&text[i+1]==='\n')i++;fields.push(field);field='';if(fields.some(v=>v.trim()))rows.push(fields);fields=[];}
+  else field+=ch;
+ }
+ if(quoted)throw new Error('CSV has an unfinished quoted field.');
+ fields.push(field);if(fields.some(v=>v.trim()))rows.push(fields);
+ return rows;
+}
+function parseSquareCsv(text){
+ const rows=parseCsv(text);
+ const clean=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
+ // Some Square templates contain instruction rows; locate the real table header.
+ const headIndex=rows.findIndex(r=>r.some(v=>clean(v)==='item name')&&r.some(v=>clean(v)==='sku'));
+ if(headIndex<0)throw new Error('Could not find Square columns "Item Name" and "SKU". Export Item Library as CSV.');
+ const heads=rows[headIndex].map(clean);
+ const col=(...names)=>heads.findIndex(h=>names.includes(h));
+ const itemCol=col('item name'), skuCol=col('sku'), variationCol=col('variation name');
+ const priceCol=heads.findIndex(h=>h==='price');
+ const otherPriceCols=heads.map((h,i)=>({h,i})).filter(x=>/^price\s*[([]/.test(x.h)).map(x=>x.i);
+ const priceCols=[priceCol,...otherPriceCols].filter(i=>i>=0);
+ if(!priceCols.length)throw new Error('Could not find a Price column in the Square CSV.');
+ const result=[];
+ for(const r of rows.slice(headIndex+1)){
+  let name=(r[itemCol]||'').trim(), sku=(r[skuCol]||'').trim(), variation=variationCol<0?'':(r[variationCol]||'').trim();
+  if(!name)continue;
+  const priceText=priceCols.map(i=>(r[i]||'').trim()).find(Boolean)||'';
+  let amount=priceText.replace(/[$,]/g,'').trim();
+  // Square can mark prices as variable; these are not safe to auto-fill.
+  const usable=amount!==''&&/^\d+(?:\.\d{1,2})?$/.test(amount)&&Number.isFinite(Number(amount));
+  result.push({name,sku,variation,price:usable?Number(amount).toFixed(2):'',rawPrice:priceText});
+ }
+ return result;
+}
+function drawSquareResults(){
+ const q=sq.squareSearch.value.trim().toLowerCase();
+ visibleSquareRows=squareRows.filter(r=>(r.name+' '+r.variation+' '+r.sku).toLowerCase().includes(q)).slice(0,150);
+ sq.squareItem.replaceChildren();
+ if(!visibleSquareRows.length){let o=document.createElement('option');o.textContent='No matching items';sq.squareItem.add(o);sq.useSquare.disabled=true;return;}
+ visibleSquareRows.forEach((r,i)=>{
+  const o=document.createElement('option');o.value=String(i);
+  o.textContent=[r.name,r.variation&&r.variation!=='Regular'?(' — '+r.variation):'',r.sku?' · '+r.sku:' · NO SKU',r.price?' · $'+r.price:' · NO PRICE'].join('');
+  sq.squareItem.add(o);
+ });
+ sq.squareItem.selectedIndex=0;sq.useSquare.disabled=false;
+}
+sq.squareFile.addEventListener('change',async()=>{
+ const f=sq.squareFile.files?.[0];if(!f)return;
+ sq.squareSearch.disabled=true;sq.squareItem.disabled=true;sq.useSquare.disabled=true;
+ try{
+  if(f.size>30*1024*1024)throw new Error('CSV is over 30 MB. Export a smaller, filtered Square catalog.');
+  squareRows=parseSquareCsv(await f.text());
+  if(!squareRows.length)throw new Error('No inventory items found in the CSV.');
+  sq.squareSearch.value='';sq.squareSearch.disabled=false;sq.squareItem.disabled=false;drawSquareResults();
+  showSquareStatus(`${squareRows.length} Square product variations loaded from ${f.name}. Data stays in this browser tab.`);
+ }catch(e){squareRows=[];sq.squareItem.replaceChildren();showSquareStatus('Import failed: '+e.message);}
+});
+sq.squareSearch.addEventListener('input',drawSquareResults);
+sq.squareItem.addEventListener('change',()=>{sq.useSquare.disabled=sq.squareItem.selectedIndex<0;});
+sq.useSquare.addEventListener('click',()=>{
+ const row=visibleSquareRows[Number(sq.squareItem.value)];if(!row)return;
+ els.name.value=row.variation&&row.variation.toLowerCase()!=='regular'?`${row.name} — ${row.variation}`:row.name;
+ els.sku.value=row.sku;els.price.value=row.price;
+ render();
+ const missing=[!row.sku&&'SKU',!row.price&&'price'].filter(Boolean);
+ setStatus(missing.length?`Selected ${row.name}. Square item is missing ${missing.join(' and ')}; enter before printing.`:`Selected ${row.name}. Review the label and print when ready.`);
+});
+
 let printer = null;
 let valid = false;
 const setStatus = text => { els.status.textContent = text; };
