@@ -11,6 +11,9 @@
 <button id="useSquare" type="button" class="outline" disabled>Use selected product on label</button>
 <p class="hint">Selecting an item fills in the name, price, and SKU. Nothing is sent back to Square. Variations remain separate; missing prices or SKUs must be filled in manually before printing.</p>
 </section><section class="panel"><h2>Product details</h2><label for="name">Product name</label><input id="name" maxlength="100" value="Floral Kindle Case"/>
+<div class="font-control"><label for="nameFontSize">Product name font size: <output id="nameFontValue" for="nameFontSize">28</output> px</label>
+<div class="twocol"><input id="nameFontSize" type="range" min="16" max="42" value="28" step="1" aria-describedby="nameFontHelp"/><button id="resetNameFont" type="button" class="outline">Reset size</button></div>
+<p id="nameFontHelp" class="hint">Move the slider to change the label preview instantly. The selected size also applies to batch printing; long names automatically shrink to fit.</p></div>
 <div class="twocol"><div><label for="price">Price ($)</label><input id="price" type="number" min="0" step="0.01" value="25.00"/></div><div><label for="qty">Copies</label><input id="qty" type="number" min="1" max="20" step="1" value="1"/></div></div>
 <label for="sku">SKU / barcode value</label><input id="sku" maxlength="32" value="CASE-FLORAL-01"/><p class="hint">Prints a real Code 128 barcode that encodes your exact SKU. Use the SKU stored in Square for scanner lookup.</p>
 <label class="check"><input id="brand" type="checkbox" checked/> Show bookstore name</label>
