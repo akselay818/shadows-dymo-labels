@@ -12,3 +12,7 @@ This ZIP contains the **whole working Vite project**, not only the changed files
 6. Move slider 16 to 42; both actual-size status and canvas title should change.
 
 If the `v4` banner is absent, the site is serving an older build. If Actions fails, check the failing build step before uploading another replacement.
+
+
+## v5 font controls
+The −, +, slider, numeric box and reset button all set the same canvas font. The live sample near the controls changes immediately, even when the print preview is below the fold. The print function uses that canvas. Verify a single physical print before batches.
