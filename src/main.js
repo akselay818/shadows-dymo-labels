@@ -5,7 +5,7 @@ import { MEDIA } from '@thermal-label/labelwriter-core';
 
 // DYMO 30336: 54 mm across printer head, 25 mm feed direction, @ 300 dpi.
 const W = 638, H = 295;
-const els = Object.fromEntries(['name','price','qty','sku','brand','nameFontSize','nameFontValue','resetNameFont','connect','print','status','png','labelCanvas'].map(id=>[id,document.getElementById(id)]));
+const els = Object.fromEntries(['name','price','qty','sku','brand','nameFontSize','nameFontValue','nameFontActual','resetNameFont','connect','print','status','png','labelCanvas'].map(id=>[id,document.getElementById(id)]));
 const ctx = els.labelCanvas.getContext('2d',{willReadFrequently:true});
 // Square's CSV is loaded only into this browser tab. No Square credentials or write access.
 const sq = Object.fromEntries(['squareFile','squareStatus','squareSearch','squareItem','useSquare'].map(id=>[id,document.getElementById(id)]));
@@ -98,9 +98,46 @@ let valid = false;
 const setStatus = text => { els.status.textContent = text; };
 const money = raw => { const value=Number(raw); if(!Number.isFinite(value)||value<0||value>999999) throw new Error('Enter a valid nonnegative price.'); return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(value); };
 const getSku = () => {const sku=els.sku.value.trim();if(!sku||sku.length>32||!/^[\x20-\x7E]+$/.test(sku))throw new Error('SKU must contain 1–32 printable English letters, numbers, or symbols.');return sku;};
+// Wrap product names into full-size lines instead of letting canvas silently
+// compress a single line horizontally (fillText's maxWidth argument).
+function wrapProductName(name, size, maxWidth) {
+ ctx.font = `700 ${size}px Arial`;
+ const lines = [];
+ let line = '';
+ for (const word of name.trim().split(/\s+/)) {
+  const candidate = line ? line + ' ' + word : word;
+  if (ctx.measureText(candidate).width <= maxWidth) { line = candidate; continue; }
+  if (line) { lines.push(line); line = ''; }
+  // Split rare extra-long strings rather than squeezing the text horizontally.
+  let chunk = '';
+  for (const char of word) {
+   if (chunk && ctx.measureText(chunk + char).width > maxWidth) {
+    lines.push(chunk); chunk = char;
+   } else chunk += char;
+  }
+  line = chunk;
+ }
+ if (line) lines.push(line);
+ return lines;
+}
+function titleLayout(name, requestedSize, branded) {
+ const requested = Math.max(16, Math.min(42, Math.round(requestedSize) || 28));
+ // Brand sits above the title. Leave the price and barcode areas untouched.
+ const startY = branded ? 60 : 35;
+ const maxBottom = 128;
+ for (let size = requested; size >= 16; size--) {
+  const lines = wrapProductName(name, size, W - 50);
+  const lineHeight = Math.ceil(size * 1.12);
+  const totalHeight = lines.length * lineHeight;
+  if (lines.length <= 3 && totalHeight <= maxBottom - startY + 5) {
+   return {size, lines, startY, lineHeight};
+  }
+ }
+ throw new Error('Name too long to fit on the label; shorten it slightly.');
+}
 function fitText(text,maxPx,maxWidth,weight='700',font='Arial') {
  let size=maxPx;
- do {ctx.font=`${weight} ${size}px ${font}`;if(ctx.measureText(text).width<=maxWidth) break;size-=2;}while(size>17);
+ do {ctx.font=`${weight} ${size}px ${font}`;if(ctx.measureText(text).width<=maxWidth)break;size-=2;}while(size>17);
  return size;
 }
 function barcodeCanvas(sku){
@@ -116,25 +153,30 @@ function render(){
   let name=els.name.value.trim();if(!name)throw new Error('Enter a product name.');
   ctx.fillStyle='#111111';ctx.textAlign='left';ctx.textBaseline='middle';
   if(els.brand.checked){ctx.font='700 19px Arial';ctx.fillText('SHADOWS & SWEETHEARTS',25,29);ctx.fillRect(25,44,W-50,2);}
-  const top=els.brand.checked?70:40;
-  const titleSize=fitText(name,Number(els.nameFontSize.value),W-50);
-  ctx.font=`700 ${titleSize}px Arial`;ctx.fillText(name,25,top,W-50);
+  const title=titleLayout(name,Number(els.nameFontSize.value),els.brand.checked);
+  ctx.font=`700 ${title.size}px Arial`;
+  ctx.textBaseline='top';
+  title.lines.forEach((line,i)=>ctx.fillText(line,25,title.startY+i*title.lineHeight));
+  ctx.textBaseline='middle';
+  if (els.nameFontActual) els.nameFontActual.textContent =
+   `Printed name: ${title.size} px · ${title.lines.length} line${title.lines.length===1?'':'s'}` +
+   (title.size < Number(els.nameFontSize.value) ? ' (reduced only to fit)' : '');
   const priceSize=fitText(price,65,290);
-  ctx.font=`800 ${priceSize}px Arial`;ctx.fillText(price,26,152);
+  ctx.font=`800 ${priceSize}px Arial`;ctx.fillText(price,26,177);
   const bar=barcodeCanvas(sku);
   // Keep barcode quiet zones: a 20-dot margin on both sides.
   const maxBW=290, maxBH=82;
   const scale=Math.min(1,maxBW/bar.width,maxBH/bar.height);
   const bW=Math.round(bar.width*scale),bH=Math.round(bar.height*scale);
   ctx.imageSmoothingEnabled=false;
-  ctx.drawImage(bar,W-24-bW,114,bW,bH);
+  ctx.drawImage(bar,W-24-bW,140,bW,bH);
   ctx.imageSmoothingEnabled=true;
-  ctx.font='17px Arial';ctx.textAlign='right';ctx.fillText(sku,W-28,215,W-50);
-  ctx.textAlign='left';ctx.fillStyle='#444';ctx.font='16px Arial';ctx.fillText('SKU  '+sku,26,251,W-50);
+  ctx.font='17px Arial';ctx.textAlign='right';ctx.fillText(sku,W-28,240,W-50);
+  ctx.textAlign='left';ctx.fillStyle='#444';ctx.font='16px Arial';ctx.fillText('SKU  '+sku,26,270,W-50);
   valid=true;
   if(printer) els.print.disabled=false;
   return true;
- }catch(error){valid=false;els.print.disabled=true;ctx.fillStyle='#7d2128';ctx.font='20px Arial';ctx.fillText(error.message.slice(0,50),24,230);setStatus(error.message);return false;}
+ }catch(error){valid=false;els.print.disabled=true;if(els.nameFontActual)els.nameFontActual.textContent='Cannot fit product name — revise the name.';ctx.fillStyle='#7d2128';ctx.font='20px Arial';ctx.fillText(error.message.slice(0,50),24,230);setStatus(error.message);return false;}
 }
 function sameMedia(m){if(!m)return false;let a=Number(m.widthMm),b=Number(m.heightMm);if(!Number.isFinite(a)||!Number.isFinite(b))return false;return Math.abs(Math.max(a,b)-54)<2.5&&Math.abs(Math.min(a,b)-25)<2.5;}
 function selectedMedia(){return Object.values(MEDIA).find(m=>m && sameMedia(m));}
