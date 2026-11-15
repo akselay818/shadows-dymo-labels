@@ -1,0 +1,9 @@
+{
+  "name": "shadows-sweethearts-dymo-label-maker",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {"dev": "vite --host 0.0.0.0", "build": "vite build", "preview": "vite preview"},
+  "dependencies": {"@thermal-label/labelwriter-web":"0.6.4", "@thermal-label/labelwriter-core":"0.6.4", "jsbarcode":"3.11.6"},
+  "devDependencies": {"vite":"^6.3.5"}
+}
