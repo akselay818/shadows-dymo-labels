@@ -120,20 +120,27 @@ function wrapProductName(name, size, maxWidth) {
  if (line) lines.push(line);
  return lines;
 }
+// Honor the slider exactly. We never reduce the user's requested font size.
+// When the selected text cannot fit on the physical label, we visibly mark
+// the shortened preview so that no print silently alters the name.
 function titleLayout(name, requestedSize, branded) {
- const requested = Math.max(16, Math.min(42, Math.round(requestedSize) || 28));
- // Brand sits above the title. Leave the price and barcode areas untouched.
- const startY = branded ? 60 : 35;
- const maxBottom = 128;
- for (let size = requested; size >= 16; size--) {
-  const lines = wrapProductName(name, size, W - 50);
-  const lineHeight = Math.ceil(size * 1.12);
-  const totalHeight = lines.length * lineHeight;
-  if (lines.length <= 3 && totalHeight <= maxBottom - startY + 5) {
-   return {size, lines, startY, lineHeight};
-  }
+ const size = Math.max(16, Math.min(42, Math.round(requestedSize) || 28));
+ const startY = branded ? 57 : 25;
+ const maxBottom = 150; // Space above price / machine-readable barcode.
+ const lineHeight = Math.ceil(size * 1.12);
+ const maxLines = Math.max(1, Math.floor((maxBottom-startY) / lineHeight));
+ const lines = wrapProductName(name, size, W-50);
+ const shortened = lines.length > maxLines;
+ const visibleLines = lines.slice(0,maxLines);
+ if(shortened){
+  // Ellipsis belongs to the visible preview and printed result.
+  let last = visibleLines[maxLines-1];
+  ctx.font=`700 ${size}px Arial`;
+  const suffix='…';
+  while(last && ctx.measureText(last+suffix).width > W-50) last=last.slice(0,-1);
+  visibleLines[maxLines-1]=last.trimEnd()+suffix;
  }
- throw new Error('Name too long to fit on the label; shorten it slightly.');
+ return {size, lines:visibleLines, shortened, startY, lineHeight};
 }
 function fitText(text,maxPx,maxWidth,weight='700',font='Arial') {
  let size=maxPx;
@@ -158,25 +165,27 @@ function render(){
   ctx.textBaseline='top';
   title.lines.forEach((line,i)=>ctx.fillText(line,25,title.startY+i*title.lineHeight));
   ctx.textBaseline='middle';
-  if (els.nameFontActual) els.nameFontActual.textContent =
-   `Printed name: ${title.size} px · ${title.lines.length} line${title.lines.length===1?'':'s'}` +
-   (title.size < Number(els.nameFontSize.value) ? ' (reduced only to fit)' : '');
+  if (els.nameFontActual) {
+   els.nameFontActual.textContent = `Printed name: ${title.size} px · ${title.lines.length} line${title.lines.length===1?'':'s'}` +
+    (title.shortened ? ' · TITLE SHORTENED TO FIT (choose a smaller size or a shorter name)' : ' · full title fits');
+   els.nameFontActual.style.color = title.shortened ? '#a31b26' : '';
+  }
   const priceSize=fitText(price,65,290);
-  ctx.font=`800 ${priceSize}px Arial`;ctx.fillText(price,26,177);
+  ctx.font=`800 ${priceSize}px Arial`;ctx.fillText(price,26,206);
   const bar=barcodeCanvas(sku);
   // Keep barcode quiet zones: a 20-dot margin on both sides.
   const maxBW=290, maxBH=82;
   const scale=Math.min(1,maxBW/bar.width,maxBH/bar.height);
   const bW=Math.round(bar.width*scale),bH=Math.round(bar.height*scale);
   ctx.imageSmoothingEnabled=false;
-  ctx.drawImage(bar,W-24-bW,140,bW,bH);
+  ctx.drawImage(bar,W-24-bW,151,bW,bH);
   ctx.imageSmoothingEnabled=true;
   ctx.font='17px Arial';ctx.textAlign='right';ctx.fillText(sku,W-28,240,W-50);
   ctx.textAlign='left';ctx.fillStyle='#444';ctx.font='16px Arial';ctx.fillText('SKU  '+sku,26,270,W-50);
   valid=true;
   if(printer) els.print.disabled=false;
   return true;
- }catch(error){valid=false;els.print.disabled=true;if(els.nameFontActual)els.nameFontActual.textContent='Cannot fit product name — revise the name.';ctx.fillStyle='#7d2128';ctx.font='20px Arial';ctx.fillText(error.message.slice(0,50),24,230);setStatus(error.message);return false;}
+ }catch(error){valid=false;els.print.disabled=true;if(els.nameFontActual)els.nameFontActual.textContent='Preview error — check product name, price and SKU.';ctx.fillStyle='#7d2128';ctx.font='20px Arial';ctx.fillText(error.message.slice(0,50),24,230);setStatus(error.message);return false;}
 }
 function sameMedia(m){if(!m)return false;let a=Number(m.widthMm),b=Number(m.heightMm);if(!Number.isFinite(a)||!Number.isFinite(b))return false;return Math.abs(Math.max(a,b)-54)<2.5&&Math.abs(Math.min(a,b)-25)<2.5;}
 function selectedMedia(){return Object.values(MEDIA).find(m=>m && sameMedia(m));}
@@ -235,7 +244,7 @@ els.connect.addEventListener('click',connect);
 els.print.addEventListener('click',print);
 for(const k of ['name','price','sku','brand'])els[k].addEventListener('input',()=>{render();if(valid&&!printer)setStatus('Preview ready. Click Connect DYMO 550 to enable printing.');});
 els.png.addEventListener('click',()=>{if(!render())return;const link=document.createElement('a');link.download='shadows-sweethearts-30336-label.png';link.href=els.labelCanvas.toDataURL('image/png');link.click();});
-render();setStatus('Preview ready. Click Connect DYMO 550 to enable printing.');
+render();setStatus('Font control v3 loaded. Preview ready. Connect DYMO 550 to print.');
 if(!navigator.usb){setStatus('Chrome WebUSB is unavailable. Open the hosted HTTPS site in Chrome on the Chromebook.');els.connect.disabled=true;}
 
 
