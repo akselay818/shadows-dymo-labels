@@ -5,7 +5,7 @@ import { MEDIA } from '@thermal-label/labelwriter-core';
 
 // DYMO 30336: 54 mm across printer head, 25 mm feed direction, @ 300 dpi.
 const W = 638, H = 295;
-const els = Object.fromEntries(['name','price','qty','sku','brand','nameFontSize','nameFontValue','nameFontActual','nameFontInput','increaseNameFont','decreaseNameFont','nameFontDemo','resetNameFont','connect','print','status','png','labelCanvas'].map(id=>[id,document.getElementById(id)]));
+const els = Object.fromEntries(['name','price','qty','sku','brand','labelTextSize','nameFontSize','nameFontValue','nameFontActual','nameFontInput','increaseNameFont','decreaseNameFont','nameFontDemo','resetNameFont','connect','print','status','png','labelCanvas'].map(id=>[id,document.getElementById(id)]));
 const ctx = els.labelCanvas.getContext('2d',{willReadFrequently:true});
 // Square's CSV is loaded only into this browser tab. No Square credentials or write access.
 const sq = Object.fromEntries(['squareFile','squareStatus','squareSearch','squareItem','useSquare'].map(id=>[id,document.getElementById(id)]));
@@ -153,14 +153,23 @@ function barcodeCanvas(sku){
  JsBarcode(out,sku,{format:'CODE128',width:2,height:68,margin:0,displayValue:false,background:'#ffffff',lineColor:'#000000'});
  return out;
 }
-function render(){
+const textSizes = {
+ compact: {name: 22, price: 43, brand: 16, barcodeCaption: 14, sku: 13},
+ standard: {name: 28, price: 65, brand: 19, barcodeCaption: 17, sku: 16},
+};
+
+function labelTypography() {
+ return {...textSizes[els.labelTextSize.value], name: Number(els.nameFontSize.value)};
+}
+
+function render(typography = labelTypography()){
  ctx.fillStyle='#ffffff';ctx.fillRect(0,0,W,H);
  try{
   const sku=getSku(), price=money(els.price.value);
   let name=els.name.value.trim();if(!name)throw new Error('Enter a product name.');
   ctx.fillStyle='#111111';ctx.textAlign='left';ctx.textBaseline='middle';
-  if(els.brand.checked){ctx.font='700 19px Arial';ctx.fillText('SHADOWS & SWEETHEARTS',25,29);ctx.fillRect(25,44,W-50,2);}
-  const title=titleLayout(name,Number(els.nameFontSize.value),els.brand.checked);
+  if(els.brand.checked){ctx.font=`700 ${typography.brand}px Arial`;ctx.fillText('SHADOWS & SWEETHEARTS',25,29);ctx.fillRect(25,44,W-50,2);}
+  const title=titleLayout(name,typography.name,els.brand.checked);
   ctx.font=`700 ${title.size}px Arial`;
   ctx.textBaseline='top';
   title.lines.forEach((line,i)=>ctx.fillText(line,25,title.startY+i*title.lineHeight));
@@ -170,7 +179,7 @@ function render(){
     (title.shortened ? ' · TITLE SHORTENED TO FIT (choose a smaller size or a shorter name)' : ' · full title fits');
    els.nameFontActual.style.color = title.shortened ? '#a31b26' : '';
   }
-  const priceSize=fitText(price,65,290);
+  const priceSize=fitText(price,typography.price,290,'800');
   ctx.font=`800 ${priceSize}px Arial`;ctx.fillText(price,26,206);
   const bar=barcodeCanvas(sku);
   // Keep barcode quiet zones: a 20-dot margin on both sides.
@@ -180,8 +189,8 @@ function render(){
   ctx.imageSmoothingEnabled=false;
   ctx.drawImage(bar,W-24-bW,151,bW,bH);
   ctx.imageSmoothingEnabled=true;
-  ctx.font='17px Arial';ctx.textAlign='right';ctx.fillText(sku,W-28,240,W-50);
-  ctx.textAlign='left';ctx.fillStyle='#444';ctx.font='16px Arial';ctx.fillText('SKU  '+sku,26,270,W-50);
+  ctx.font=`${typography.barcodeCaption}px Arial`;ctx.textAlign='right';ctx.fillText(sku,W-28,240,W-50);
+  ctx.textAlign='left';ctx.fillStyle='#444';ctx.font=`${typography.sku}px Arial`;ctx.fillText('SKU  '+sku,26,270,W-50);
   valid=true;
   if(printer) els.print.disabled=false;
   return true;
@@ -208,18 +217,20 @@ async function connect(){
  }catch(e){setStatus('Connection problem: '+(e?.message||e));els.print.disabled=true;if(printer){try{await printer.close();}catch{}printer=null;}}
  finally{els.connect.disabled=false;updateBatchControls();}
 }
+function labelRaster() {
+ const {data} = ctx.getImageData(0,0,W,H);
+ return {width:W,height:H,data:new Uint8Array(data)};
+}
 async function print(){
  if(!printer||!render())return;
  const count=Number(els.qty.value);
  if(!Number.isInteger(count)||count<1||count>20){setStatus('Copies must be between 1 and 20.');return;}
+ const image=labelRaster();
  els.print.disabled=true;
  try{
   const st=await printer.getStatus();
   if(!st.ready||st.mediaLoaded===false)throw new Error('Printer not ready or labels absent.');
   if(st.detectedMedia&&!sameMedia(st.detectedMedia))throw new Error('Loaded labels do not match 30336; printing cancelled.');
-  // The labelwriter API takes browser canvas RGBA data.
-  const img=ctx.getImageData(0,0,W,H);
-  const image={width:W,height:H,data:new Uint8Array(img.data)};
   const media=selectedMedia();
   if(!media)throw new Error('Driver package has no 30336 media definition.');
   for(let i=0;i<count;i++){
@@ -249,14 +260,16 @@ function setNameFontSize(next) {
 els.nameFontSize.addEventListener('input',()=>setNameFontSize(els.nameFontSize.value));
 els.nameFontSize.addEventListener('change',()=>setNameFontSize(els.nameFontSize.value));
 els.nameFontInput.addEventListener('input',()=>{if(els.nameFontInput.value!=='')setNameFontSize(els.nameFontInput.value);});
-els.nameFontInput.addEventListener('change',()=>setNameFontSize(els.nameFontInput.value||28));
+els.nameFontInput.addEventListener('change',()=>setNameFontSize(els.nameFontInput.value||textSizes[els.labelTextSize.value].name));
 els.increaseNameFont.addEventListener('click',()=>setNameFontSize(Number(els.nameFontSize.value)+1));
 els.decreaseNameFont.addEventListener('click',()=>setNameFontSize(Number(els.nameFontSize.value)-1));
-els.resetNameFont.addEventListener('click',()=>setNameFontSize(28));
+els.resetNameFont.addEventListener('click',()=>setNameFontSize(textSizes[els.labelTextSize.value].name));
 els.print.addEventListener('click',print);
 for(const k of ['name','price','sku','brand'])els[k].addEventListener('input',()=>{if(k==='name'){els.nameFontDemo.textContent=els.name.value.trim()||'Floral Kindle Case';}render();if(valid&&!printer)setStatus('Preview ready. Click Connect DYMO 550 to enable printing.');});
 els.png.addEventListener('click',()=>{if(!render())return;const link=document.createElement('a');link.download='shadows-sweethearts-30336-label.png';link.href=els.labelCanvas.toDataURL('image/png');link.click();});
-setNameFontSize(28);setStatus('Font controls v5 loaded. Preview ready. Connect DYMO 550 to print.');
+els.labelTextSize.addEventListener('change',()=>setNameFontSize(textSizes[els.labelTextSize.value].name));
+setNameFontSize(textSizes[els.labelTextSize.value].name);
+setStatus('Preview ready. Connect DYMO 550 to print.');
 if(!navigator.usb){setStatus('Chrome WebUSB is unavailable. Open the hosted HTTPS site in Chrome on the Chromebook.');els.connect.disabled=true;}
 
 
@@ -331,6 +344,7 @@ b.batchPrint.addEventListener('click',async()=>{
  if(total<1||total>500){batchStatus('Choose 1–500 labels.');return;}
  if(queue.some(x=>!printable(x.row)||!Number.isInteger(x.copies)||x.copies<1||x.copies>20)){batchStatus('Selection has invalid product data or copies.');return;}
  if(!window.confirm(`Send ${total} labels for ${queue.length} products to your DYMO 550? Check the loaded 30336 roll first.`))return;
+ const typography=labelTypography();
  batchBusy=true;stopRequested=false;updateBatchControls();
  const original={name:els.name.value,price:els.price.value,sku:els.sku.value};let completed=0;
  try{
@@ -339,8 +353,8 @@ b.batchPrint.addEventListener('click',async()=>{
   const media=selectedMedia();if(!media)throw new Error('Driver has no 30336 media definition.');
   outer: for(const item of queue){
    els.name.value=labelName(item.row);els.price.value=item.row.price;els.sku.value=item.row.sku;
-   if(!render())throw new Error('Could not render '+labelName(item.row));
-   const img=ctx.getImageData(0,0,W,H);const image={width:W,height:H,data:new Uint8Array(img.data)};
+   if(!render(typography))throw new Error('Could not render '+labelName(item.row));
+   const image=labelRaster();
    for(let copy=0;copy<item.copies;copy++){
     if(stopRequested)break outer;
     batchStatus(`Sending label ${completed+1} of ${total}: ${labelName(item.row)} (${copy+1}/${item.copies})`);
