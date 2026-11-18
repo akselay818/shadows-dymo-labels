@@ -1,6 +1,6 @@
 import './style.css';
 import JsBarcode from 'jsbarcode';
-import { requestPrinter, fromUSBDevice } from '@thermal-label/labelwriter-web';
+import { requestPrinter } from '@thermal-label/labelwriter-web';
 import { MEDIA } from '@thermal-label/labelwriter-core';
 
 // DYMO 30336: 54 mm across printer head, 25 mm feed direction, @ 300 dpi.
@@ -94,6 +94,7 @@ sq.useSquare.addEventListener('click',()=>{
 });
 
 let printer = null;
+let batchBusy=false, singleBusy=false, stopRequested=false;
 let valid = false;
 const setStatus = text => { els.status.textContent = text; };
 const money = raw => { const value=Number(raw); if(!Number.isFinite(value)||value<0||value>999999) throw new Error('Enter a valid nonnegative price.'); return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(value); };
@@ -126,7 +127,7 @@ function wrapProductName(name, size, maxWidth) {
 function titleLayout(name, requestedSize, branded) {
  const size = Math.max(16, Math.min(42, Math.round(requestedSize) || 28));
  const startY = branded ? 57 : 25;
- const maxBottom = 150; // Space above price / machine-readable barcode.
+ const maxBottom = 122; // Leave room for the price above the barcode.
  const lineHeight = Math.ceil(size * 1.12);
  const maxLines = Math.max(1, Math.floor((maxBottom-startY) / lineHeight));
  const lines = wrapProductName(name, size, W-50);
@@ -154,8 +155,8 @@ function barcodeCanvas(sku){
  return out;
 }
 const textSizes = {
- compact: {name: 22, price: 43, brand: 16, barcodeCaption: 14, sku: 13},
- standard: {name: 28, price: 65, brand: 19, barcodeCaption: 17, sku: 16},
+ compact: {name: 22, price: 43, brand: 16, sku: 13},
+ standard: {name: 28, price: 65, brand: 19, sku: 16},
 };
 
 function labelTypography() {
@@ -179,42 +180,66 @@ function render(typography = labelTypography()){
     (title.shortened ? ' · TITLE SHORTENED TO FIT (choose a smaller size or a shorter name)' : ' · full title fits');
    els.nameFontActual.style.color = title.shortened ? '#a31b26' : '';
   }
-  const priceSize=fitText(price,typography.price,290,'800');
-  ctx.font=`800 ${priceSize}px Arial`;ctx.fillText(price,26,206);
+  const priceSize=fitText(price,typography.price,W-50,'800');
+  ctx.textAlign='center';
+  ctx.font=`800 ${priceSize}px Arial`;ctx.fillText(price,W/2,151);
   const bar=barcodeCanvas(sku);
   // Keep barcode quiet zones: a 20-dot margin on both sides.
   const maxBW=290, maxBH=82;
   const scale=Math.min(1,maxBW/bar.width,maxBH/bar.height);
   const bW=Math.round(bar.width*scale),bH=Math.round(bar.height*scale);
   ctx.imageSmoothingEnabled=false;
-  ctx.drawImage(bar,W-24-bW,151,bW,bH);
+  ctx.drawImage(bar,Math.floor((W-bW)/2),188,bW,bH);
   ctx.imageSmoothingEnabled=true;
-  ctx.font=`${typography.barcodeCaption}px Arial`;ctx.textAlign='right';ctx.fillText(sku,W-28,240,W-50);
-  ctx.textAlign='left';ctx.fillStyle='#444';ctx.font=`${typography.sku}px Arial`;ctx.fillText('SKU  '+sku,26,270,W-50);
+  ctx.fillStyle='#444';ctx.font=`${typography.sku}px Arial`;ctx.fillText('SKU  '+sku,W/2,274,W-50);
   valid=true;
-  if(printer) els.print.disabled=false;
+  if(printer && !singleBusy && !batchBusy) els.print.disabled=false;
   return true;
  }catch(error){valid=false;els.print.disabled=true;if(els.nameFontActual)els.nameFontActual.textContent='Preview error — check product name, price and SKU.';ctx.fillStyle='#7d2128';ctx.font='20px Arial';ctx.fillText(error.message.slice(0,50),24,230);setStatus(error.message);return false;}
 }
 function sameMedia(m){if(!m)return false;let a=Number(m.widthMm),b=Number(m.heightMm);if(!Number.isFinite(a)||!Number.isFinite(b))return false;return Math.abs(Math.max(a,b)-54)<2.5&&Math.abs(Math.min(a,b)-25)<2.5;}
 function selectedMedia(){return Object.values(MEDIA).find(m=>m && sameMedia(m));}
 async function connect(){
- els.connect.disabled=true;setStatus('Connecting to the printer…');
+ if (els.connect.disabled) return;
+ if (printer) {
+  els.connect.disabled = true;
+  els.print.disabled = true;
+  const connected = printer;
+  printer = null;
+  updateBatchControls();
+  try { await connected.close(); }
+  catch (error) { setStatus('Could not release the printer: '+(error?.message||error)); }
+  finally {
+   els.connect.textContent = 'Connect DYMO 550';
+   els.connect.disabled = false;
+  }
+  if (!els.status.textContent.startsWith('Could not release')) setStatus('Disconnected. Click Connect DYMO 550 to select it again.');
+  return;
+ }
+ els.connect.disabled = true;
+ els.print.disabled = true;
+ setStatus('Select your DYMO LabelWriter 550 in the Chrome USB picker.');
+ let candidate;
  try{
-  if(printer){try{await printer.close();}catch{} printer=null;}
-  // Reuse browser's permission if available; otherwise ask during a click.
-  const previous=await navigator.usb.getDevices();
-  const device=previous.find(d=>d.vendorId===0x0922&&d.productId===0x0028);
-  try{printer=device?await fromUSBDevice(device):await requestPrinter();}
-  catch(e){if(device) printer=await requestPrinter();else throw e;}
-  const status=await printer.getStatus();
+  // Open the picker directly from the click so Chrome retains user activation.
+  candidate = await requestPrinter({filters:[{vendorId:0x0922,productId:0x0028}]});
+  const status = await candidate.getStatus();
   if(!status.ready)throw new Error('DYMO is connected but not ready. Check paper and lights. '+(status.errors?.map(x=>x.message||x.code||x).join(', ')||''));
   if(status.mediaLoaded===false)throw new Error('No labels detected. Insert genuine DYMO 30336 roll.');
   if(status.detectedMedia && !sameMedia(status.detectedMedia))throw new Error('Loaded label size does not match 30336 (25 × 54 mm). Change the roll before printing.');
-  els.connect.textContent='Reconnect DYMO';
+  printer = candidate;
+  els.connect.textContent='Disconnect DYMO';
   setStatus('Connected and ready. Confirm you loaded genuine DYMO 30336 labels, then print one test label.');
-  els.print.disabled=!valid;updateBatchControls();
- }catch(e){setStatus('Connection problem: '+(e?.message||e));els.print.disabled=true;if(printer){try{await printer.close();}catch{}printer=null;}}
+  els.print.disabled=!valid;
+ }catch(error){
+  if(candidate){try{await candidate.close();}catch{}}
+  printer = null;
+  els.connect.textContent = 'Connect DYMO 550';
+  const message = error?.name === 'NotFoundError'
+   ? 'No printer selected. Check the USB cable, then click Connect and choose the DYMO 550.'
+   : 'Connection problem: '+(error?.message||error);
+  setStatus(message);
+ }
  finally{els.connect.disabled=false;updateBatchControls();}
 }
 function labelRaster() {
@@ -222,10 +247,12 @@ function labelRaster() {
  return {width:W,height:H,data:new Uint8Array(data)};
 }
 async function print(){
- if(!printer||!render())return;
+ if(!printer||batchBusy||singleBusy||!render())return;
  const count=Number(els.qty.value);
  if(!Number.isInteger(count)||count<1||count>20){setStatus('Copies must be between 1 and 20.');return;}
  const image=labelRaster();
+ singleBusy=true;
+ updateBatchControls();
  els.print.disabled=true;
  try{
   const st=await printer.getStatus();
@@ -239,7 +266,7 @@ async function print(){
   }
   setStatus(`Sent ${count} label${count===1?'':'s'} to DYMO. Check the physical result, including barcode scanning.`);
  }catch(e){setStatus('Printing failed: '+(e?.message||e)+' — reconnect if needed, then retry one label.');}
- finally{els.print.disabled=!valid||!printer;}
+ finally{singleBusy=false;els.connect.disabled=false;els.print.disabled=!valid||!printer;updateBatchControls();}
 }
 // All size controls use one source of truth, and every change redraws the
 // same canvas that is sent to the DYMO printer (single and batch).
@@ -264,6 +291,7 @@ els.nameFontInput.addEventListener('change',()=>setNameFontSize(els.nameFontInpu
 els.increaseNameFont.addEventListener('click',()=>setNameFontSize(Number(els.nameFontSize.value)+1));
 els.decreaseNameFont.addEventListener('click',()=>setNameFontSize(Number(els.nameFontSize.value)-1));
 els.resetNameFont.addEventListener('click',()=>setNameFontSize(textSizes[els.labelTextSize.value].name));
+els.connect.addEventListener('click',connect);
 els.print.addEventListener('click',print);
 for(const k of ['name','price','sku','brand'])els[k].addEventListener('input',()=>{if(k==='name'){els.nameFontDemo.textContent=els.name.value.trim()||'Floral Kindle Case';}render();if(valid&&!printer)setStatus('Preview ready. Click Connect DYMO 550 to enable printing.');});
 els.png.addEventListener('click',()=>{if(!render())return;const link=document.createElement('a');link.download='shadows-sweethearts-30336-label.png';link.href=els.labelCanvas.toDataURL('image/png');link.click();});
@@ -277,7 +305,7 @@ if(!navigator.usb){setStatus('Chrome WebUSB is unavailable. Open the hosted HTTP
 // as the already-working single-label printer. It makes no Square API calls.
 const b=Object.fromEntries(['batchCategory','batchSearch','stockOnly','batchStockHelp','batchSelect','batchClear','batchCopies','batchApplyCopies','batchRows','batchSummary','batchPrint','batchStop','batchStatus'].map(id=>[id,document.getElementById(id)]));
 const selections=new Map(); // index in imported Square CSV => copies
-let batchBusy=false, stopRequested=false;
+
 const batchStatus = text=>{b.batchStatus.textContent=text;};
 const printable = row=>!!row && !!row.sku && row.sku.length<=32 && /^[\x20-\x7e]+$/.test(row.sku) && row.price!=='' && Number.isFinite(Number(row.price)) && Number(row.price)>=0 && Number(row.price)<=999999;
 const labelName = row=>row.variation && row.variation.toLowerCase()!=='regular'?`${row.name} — ${row.variation}`:row.name;
@@ -304,7 +332,8 @@ function initializeBatch(){
 function updateBatchControls(){
  const total=[...selections.values()].reduce((a,c)=>a+c,0);
  b.batchSummary.textContent=`${selections.size} products selected · ${total} labels${total>500?' — over 500-label limit':''}`;
- b.batchPrint.disabled=!printer||!selections.size||total>500||batchBusy;
+ b.batchPrint.disabled=!printer||!selections.size||total>500||batchBusy||singleBusy||els.connect.disabled;
+ if (printer) els.connect.disabled = batchBusy || singleBusy;
  b.batchStop.disabled=!batchBusy;
  b.batchSelect.disabled=b.batchClear.disabled=b.batchApplyCopies.disabled=batchBusy||!squareRows.length;
  b.batchCategory.disabled=b.batchSearch.disabled=batchBusy||!squareRows.length;
@@ -338,14 +367,14 @@ b.batchClear.addEventListener('click',()=>{selections.clear();renderBatchRows();
 b.batchApplyCopies.addEventListener('click',()=>{const copies=Number(b.batchCopies.value);if(!Number.isInteger(copies)||copies<1||copies>20){batchStatus('Copies must be 1–20.');return;}for(const i of selections.keys())selections.set(i,copies);renderBatchRows();});
 b.batchStop.addEventListener('click',()=>{stopRequested=true;batchStatus('Stop requested; finishing the current label.');});
 b.batchPrint.addEventListener('click',async()=>{
- if(!printer||batchBusy)return;
+ if(!printer||batchBusy||singleBusy)return;
  const queue=[...selections.entries()].map(([i,copies])=>({row:squareRows[i],copies}));
  const total=queue.reduce((a,x)=>a+x.copies,0);
  if(total<1||total>500){batchStatus('Choose 1–500 labels.');return;}
  if(queue.some(x=>!printable(x.row)||!Number.isInteger(x.copies)||x.copies<1||x.copies>20)){batchStatus('Selection has invalid product data or copies.');return;}
  if(!window.confirm(`Send ${total} labels for ${queue.length} products to your DYMO 550? Check the loaded 30336 roll first.`))return;
  const typography=labelTypography();
- batchBusy=true;stopRequested=false;updateBatchControls();
+ batchBusy=true;stopRequested=false;els.print.disabled=true;updateBatchControls();
  const original={name:els.name.value,price:els.price.value,sku:els.sku.value};let completed=0;
  try{
   const st=await printer.getStatus();if(!st.ready||st.mediaLoaded===false)throw new Error('Printer is not ready or labels are absent.');
@@ -363,6 +392,6 @@ b.batchPrint.addEventListener('click',async()=>{
   }
   batchStatus(stopRequested?`Stopped after ${completed} of ${total} labels sent. Check physical output before restarting.`:`Finished sending ${completed} labels to the DYMO. Verify the labels and scan a barcode.`);
  }catch(e){batchStatus(`Batch stopped after ${completed} of ${total} labels sent. ${e?.message||e} Check which labels printed before retrying.`);}
- finally{els.name.value=original.name;els.price.value=original.price;els.sku.value=original.sku;render();batchBusy=false;updateBatchControls();}
+ finally{els.name.value=original.name;els.price.value=original.price;els.sku.value=original.sku;batchBusy=false;els.connect.disabled=false;render();updateBatchControls();}
 });
 initializeBatch();
