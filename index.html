@@ -30,9 +30,16 @@
 <p id="batchStatus" role="status" aria-live="polite">Connect DYMO 550 in Product details before batch printing.</p>
 <p class="hint">A single batch is limited to 500 labels. If printing stops, verify the printed labels before retrying to avoid duplicates. Your CSV stays in this tab.</p>
 </section><section class="panel label-panel"><h2>Label preview</h2>
-<div class="font-control"><label for="labelTextSize">Label text size</label><select id="labelTextSize"><option value="compact" selected>Compact</option><option value="standard">Standard</option></select><p class="hint">Changes the product name, price, bookstore name, and SKU text on the actual label. The barcode stays the same size.</p><label for="nameFontSize">Product name font size: <output id="nameFontValue" for="nameFontSize">22</output> px</label>
+<div class="font-control"><label for="labelTextSize">Label text size</label><select id="labelTextSize"><option value="compact" selected>Compact</option><option value="standard">Standard</option></select><p class="hint">Changes the product name, price, bookstore name, and SKU text on the actual label. Use the barcode controls to adjust the bars.</p><label for="nameFontSize">Product name font size: <output id="nameFontValue" for="nameFontSize">22</output> px</label>
 <div class="font-stepper"><button id="decreaseNameFont" type="button" class="outline" aria-label="Decrease product name font size">−</button><input id="nameFontSize" type="range" min="16" max="42" value="22" step="1" aria-describedby="nameFontHelp"/><button id="increaseNameFont" type="button" class="outline" aria-label="Increase product name font size">+</button><input id="nameFontInput" type="number" min="16" max="42" step="1" value="22" inputmode="numeric" aria-label="Product name font size in pixels"/><button id="resetNameFont" type="button" class="outline">Reset</button></div>
 <p id="nameFontActual" class="hint" role="status" aria-live="polite">Printed name: 22 px</p><p id="nameFontHelp" class="hint">The product name updates on the label below. Long names wrap and may be shortened to fit.</p></div>
+<label for="priceFontSize">Price font size <output id="priceFontValue" for="priceFontSize">43</output> px</label>
+<input id="priceFontSize" type="range" min="22" max="68" value="43"/>
+<label for="barcodeWidth">Barcode width</label>
+<select id="barcodeWidth"><option value="1">Narrow</option><option value="2" selected>Standard</option><option value="3">Wide</option></select>
+<label for="barcodeHeight">Barcode height <output id="barcodeHeightValue" for="barcodeHeight">52</output> dots</label>
+<input id="barcodeHeight" type="range" min="32" max="74" value="52"/>
+<p id="barcodeFit" class="hint" role="status"></p>
 <label class="check"><input type="checkbox" id="fullSizePreview"/> Show full bitmap size</label>
 <div id="labelPreview" class="label-wrap" tabindex="0" aria-label="Label preview, scroll horizontally in full-size mode"><canvas id="labelCanvas" width="638" height="295" aria-label="Current label preview"></canvas></div><button id="png" type="button" class="outline">Save PNG preview</button><p class="hint">Use genuine DYMO 30336 labels. The printer's NFC roll identification can override software settings; if the loaded roll differs, printing is blocked when the driver reports the mismatch.</p></section></main>
 <footer>Unofficial in-house label tool · Uses thermal-label open-source WebUSB driver · Not affiliated with DYMO.</footer>
