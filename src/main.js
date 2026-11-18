@@ -5,7 +5,7 @@ import { MEDIA } from '@thermal-label/labelwriter-core';
 
 // DYMO 30336: 54 mm across printer head, 25 mm feed direction, @ 300 dpi.
 const W = 638, H = 295;
-const els = Object.fromEntries(['name','price','qty','sku','brand','labelTextSize','nameFontSize','nameFontValue','nameFontActual','nameFontInput','increaseNameFont','decreaseNameFont','resetNameFont','connect','print','status','png','labelCanvas','labelPreview','fullSizePreview'].map(id=>[id,document.getElementById(id)]));
+const els = Object.fromEntries(['name','price','qty','sku','brand','labelTextSize','nameFontSize','nameFontValue','nameFontActual','nameFontInput','increaseNameFont','decreaseNameFont','resetNameFont','connect','print','status','png','labelCanvas','labelPreview','fullSizePreview','priceFontSize','priceFontValue','barcodeWidth','barcodeHeight','barcodeHeightValue','barcodeFit'].map(id=>[id,document.getElementById(id)]));
 const ctx = els.labelCanvas.getContext('2d',{willReadFrequently:true});
 // Square's CSV is loaded only into this browser tab. No Square credentials or write access.
 const sq = Object.fromEntries(['squareFile','squareStatus','squareSearch','squareItem','useSquare'].map(id=>[id,document.getElementById(id)]));
@@ -148,11 +148,15 @@ function fitText(text,maxPx,maxWidth,weight='700',font='Arial') {
  do {ctx.font=`${weight} ${size}px ${font}`;if(ctx.measureText(text).width<=maxWidth)break;size-=2;}while(size>17);
  return size;
 }
-function barcodeCanvas(sku){
+function barcodeCanvas(sku, requestedWidth, height) {
  const out=document.createElement('canvas');
- // Full machine-readable Code 128 barcode, with automatic checksum.
- JsBarcode(out,sku,{format:'CODE128',width:2,height:68,margin:0,displayValue:false,background:'#ffffff',lineColor:'#000000'});
- return out;
+ const options={format:'CODE128',height,margin:0,displayValue:false,background:'#ffffff',lineColor:'#000000'};
+ // Measure the encoded symbol first, then draw whole-dot modules with quiet zones.
+ JsBarcode(out,sku,{...options,width:1});
+ const moduleWidth=Math.min(requestedWidth,Math.floor(W/(out.width+20)));
+ if (moduleWidth < 1) throw new Error('This SKU is too long for the barcode area.');
+ if (moduleWidth > 1) JsBarcode(out,sku,{...options,width:moduleWidth});
+ return {image:out,moduleWidth};
 }
 const textSizes = {
  compact: {name: 22, price: 43, brand: 16, sku: 13},
@@ -160,7 +164,13 @@ const textSizes = {
 };
 
 function labelTypography() {
- return {...textSizes[els.labelTextSize.value], name: Number(els.nameFontSize.value)};
+ return {
+  ...textSizes[els.labelTextSize.value],
+  name: Number(els.nameFontSize.value),
+  price: Number(els.priceFontSize.value),
+  barcodeWidth: Number(els.barcodeWidth.value),
+  barcodeHeight: Number(els.barcodeHeight.value),
+ };
 }
 
 function render(typography = labelTypography()){
@@ -183,14 +193,11 @@ function render(typography = labelTypography()){
   const priceSize=fitText(price,typography.price,W-50,'800');
   ctx.textAlign='center';
   ctx.font=`800 ${priceSize}px Arial`;ctx.fillText(price,W/2,151);
-  const bar=barcodeCanvas(sku);
-  // Keep barcode quiet zones: a 20-dot margin on both sides.
-  const maxBW=290, maxBH=82;
-  const scale=Math.min(1,maxBW/bar.width,maxBH/bar.height);
-  const bW=Math.round(bar.width*scale),bH=Math.round(bar.height*scale);
-  ctx.imageSmoothingEnabled=false;
-  ctx.drawImage(bar,Math.floor((W-bW)/2),188,bW,bH);
-  ctx.imageSmoothingEnabled=true;
+  const bar=barcodeCanvas(sku,typography.barcodeWidth,typography.barcodeHeight);
+  ctx.drawImage(bar.image,Math.floor((W-bar.image.width)/2),188);
+  els.barcodeFit.textContent=bar.moduleWidth < typography.barcodeWidth
+   ? 'This SKU needs narrower bars to fit the label.'
+   : '';
   ctx.fillStyle='#444';ctx.font=`${typography.sku}px Arial`;ctx.fillText('SKU  '+sku,W/2,274,W-50);
   valid=true;
   if(printer && !singleBusy && !batchBusy) els.print.disabled=false;
@@ -293,7 +300,22 @@ els.connect.addEventListener('click',connect);
 els.print.addEventListener('click',print);
 for(const k of ['name','price','sku','brand'])els[k].addEventListener('input',()=>{render();if(valid&&!printer)setStatus('Preview ready. Click Connect DYMO 550 to enable printing.');});
 els.png.addEventListener('click',()=>{if(!render())return;const link=document.createElement('a');link.download='shadows-sweethearts-30336-label.png';link.href=els.labelCanvas.toDataURL('image/png');link.click();});
-els.labelTextSize.addEventListener('change',()=>setNameFontSize(textSizes[els.labelTextSize.value].name));
+function updateSizeOutputs() {
+ els.priceFontValue.textContent=els.priceFontSize.value;
+ els.barcodeHeightValue.textContent=els.barcodeHeight.value;
+}
+for (const field of [els.priceFontSize,els.barcodeWidth,els.barcodeHeight]) {
+ field.addEventListener('input',()=>{
+  updateSizeOutputs();
+  render();
+ });
+}
+els.labelTextSize.addEventListener('change',()=>{
+ const typography=textSizes[els.labelTextSize.value];
+ els.priceFontSize.value=String(typography.price);
+ updateSizeOutputs();
+ setNameFontSize(typography.name);
+});
 setNameFontSize(textSizes[els.labelTextSize.value].name);
 setStatus('Preview ready. Connect DYMO 550 to print.');
 if(!navigator.usb){setStatus('Chrome WebUSB is unavailable. Open the hosted HTTPS site in Chrome on the Chromebook.');els.connect.disabled=true;}
